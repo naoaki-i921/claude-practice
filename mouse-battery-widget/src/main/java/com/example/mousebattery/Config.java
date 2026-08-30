@@ -25,6 +25,8 @@ public final class Config {
     public boolean soundEnabled = true;
     /** 警告音の音量(0.0〜1.0)。 */
     public float soundVolume = 0.8f;
+    /** 警告音のファイル(WAV/AIFF/AU)。空なら組み込みのビープ音。 */
+    public String soundFile = "";
     /** 低残量時にトースト通知を出すか。 */
     public boolean notificationsEnabled = true;
     /** 取得間隔(秒)。 */
@@ -56,6 +58,7 @@ public final class Config {
             c.criticalThreshold = clampPercent(getInt(c.props, "criticalThreshold", c.criticalThreshold), 1, 50);
             c.soundEnabled = getBool(c.props, "soundEnabled", c.soundEnabled);
             c.soundVolume = (float) Math.max(0.0, Math.min(1.0, getDouble(c.props, "soundVolume", c.soundVolume)));
+            c.soundFile = c.props.getProperty("soundFile", c.soundFile).trim();
             c.notificationsEnabled = getBool(c.props, "notificationsEnabled", c.notificationsEnabled);
             c.pollSeconds = Math.max(15, getInt(c.props, "pollSeconds", c.pollSeconds));
         } else {
@@ -69,6 +72,7 @@ public final class Config {
         props.setProperty("criticalThreshold", Integer.toString(criticalThreshold));
         props.setProperty("soundEnabled", Boolean.toString(soundEnabled));
         props.setProperty("soundVolume", Float.toString(soundVolume));
+        props.setProperty("soundFile", soundFile == null ? "" : soundFile);
         props.setProperty("notificationsEnabled", Boolean.toString(notificationsEnabled));
         props.setProperty("pollSeconds", Integer.toString(pollSeconds));
         try (OutputStream out = Files.newOutputStream(file)) {

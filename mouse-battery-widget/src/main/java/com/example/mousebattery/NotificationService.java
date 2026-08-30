@@ -1,15 +1,26 @@
 package com.example.mousebattery;
 
 import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.FloatControl;
+import javax.sound.sampled.Line;
+import javax.sound.sampled.LineEvent;
 import javax.sound.sampled.SourceDataLine;
 import java.awt.TrayIcon;
+import java.io.File;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * 低残量アラート。トースト通知(出せる時だけ)と警告音を担当する。
  *
  * <p>しきい値を「健全 → 残りわずか → 危険」と悪化したときだけ 1 回鳴らす。
  * 充電を開始したらリセットする。</p>
+ *
+ * <p>警告音は {@link Config#soundFile} が指定されていればその音声ファイルを、
+ * 無ければ組み込みのビープ音を鳴らす。対応形式は Java 標準の
+ * {@code javax.sound.sampled} が扱えるもの(WAV / AIFF / AU)。MP3 は非対応。</p>
  */
 public final class NotificationService {
 
@@ -59,9 +70,35 @@ public final class NotificationService {
         lastBucket = bucket;
     }
 
-    /** トレイメニューの「警告音をテスト」用。 */
+    /** トレイメニューの「警告音をテスト」用。音は設定に関係なく鳴らす。 */
     public void test() {
-        alert("テスト", "警告音と通知の確認です", TrayIcon.MessageType.INFO, 2);
+        if (config.notificationsEnabled) {
+            try {
+                toast.show("テスト", "警告音と通知の確認です", TrayIcon.MessageType.INFO);
+            } catch (Exception ignored) {
+                // ignore
+            }
+        }
+        playSound(2);
+    }
+
+    /**
+     * 指定した音声ファイルが再生可能か確認する。
+     *
+     * @return 問題なければ {@code null}、駄目なら理由の文字列
+     */
+    public static String validateSoundFile(File file) {
+        if (file == null || !file.isFile()) {
+            return "ファイルが見つかりません";
+        }
+        try (AudioInputStream ais = AudioSystem.getAudioInputStream(file)) {
+            ais.getFormat();
+            return null;
+        } catch (javax.sound.sampled.UnsupportedAudioFileException e) {
+            return "対応していない形式です (WAV / AIFF / AU を使ってください)";
+        } catch (Exception e) {
+            return "読み込めませんでした: " + e.getMessage();
+        }
     }
 
     private void alert(String title, String message, TrayIcon.MessageType type, int beeps) {
@@ -73,21 +110,79 @@ public final class NotificationService {
             }
         }
         if (config.soundEnabled) {
-            playBeeps(beeps);
+            playSound(beeps);
+        }
+    }
+
+    /** カスタム音があればそれを、無ければ組み込みビープを鳴らす。 */
+    private void playSound(int beeps) {
+        float vol = Math.max(0f, Math.min(1f, config.soundVolume));
+        if (vol <= 0.001f) {
+            return;
+        }
+        String path = config.soundFile;
+        if (path != null && !path.isBlank() && new File(path).isFile()) {
+            playFile(new File(path), vol, beeps);
+        } else {
+            playBeeps(beeps, vol);
         }
     }
 
     /**
-     * 短い警告音をオーディオ API から直接鳴らす。
+     * 音声ファイルを再生する。失敗したら組み込みビープにフォールバック。
      *
      * <p>これは単なる音声出力なので、ゲームが排他的全画面で動いていても、
      * 「集中モード」が通知音を抑制していても鳴る。</p>
      */
-    private void playBeeps(int count) {
-        final float amp = Math.max(0f, Math.min(1f, config.soundVolume));
-        if (amp <= 0.001f) {
+    private void playFile(File file, float vol, int fallbackBeeps) {
+        Thread t = new Thread(() -> {
+            try {
+                AudioInputStream raw = AudioSystem.getAudioInputStream(file);
+                AudioInputStream ais = toPcm(raw);
+                Clip clip = AudioSystem.getClip();
+                clip.open(ais);
+                applyGain(clip, vol);
+
+                CountDownLatch done = new CountDownLatch(1);
+                clip.addLineListener(e -> {
+                    if (e.getType() == LineEvent.Type.STOP) {
+                        done.countDown();
+                    }
+                });
+                clip.start();
+                done.await();
+                clip.close();
+                ais.close();
+            } catch (Exception e) {
+                playBeeps(fallbackBeeps, vol);
+            }
+        }, "battery-alert-sound");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static AudioInputStream toPcm(AudioInputStream ais) {
+        AudioFormat f = ais.getFormat();
+        if (f.getEncoding() == AudioFormat.Encoding.PCM_SIGNED) {
+            return ais;
+        }
+        float rate = f.getSampleRate() > 0 ? f.getSampleRate() : 44100f;
+        int ch = f.getChannels() > 0 ? f.getChannels() : 2;
+        AudioFormat target = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, rate, 16, ch, ch * 2, rate, false);
+        return AudioSystem.getAudioInputStream(target, ais);
+    }
+
+    private static void applyGain(Line line, float vol) {
+        if (!line.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
             return;
         }
+        FloatControl gain = (FloatControl) line.getControl(FloatControl.Type.MASTER_GAIN);
+        float dB = vol <= 0.0001f ? gain.getMinimum() : (float) (20.0 * Math.log10(vol));
+        gain.setValue(Math.max(gain.getMinimum(), Math.min(gain.getMaximum(), dB)));
+    }
+
+    /** 組み込みの短いビープ音。 */
+    private void playBeeps(int count, float amp) {
         Thread t = new Thread(() -> {
             AudioFormat fmt = new AudioFormat(44100f, 16, 1, true, false);
             try (SourceDataLine line = AudioSystem.getSourceDataLine(fmt)) {

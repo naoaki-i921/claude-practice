@@ -95,11 +95,7 @@ public final class TrayController {
                 () -> config.lowThreshold, v -> config.lowThreshold = v));
         menu.add(buildThresholdMenu("「危険」しきい値", new int[]{5, 7, 10, 15},
                 () -> config.criticalThreshold, v -> config.criticalThreshold = v));
-        menu.add(buildVolumeMenu());
-
-        MenuItem testAlert = new MenuItem("警告音をテスト");
-        testAlert.addActionListener(e -> notifier.test());
-        menu.add(testAlert);
+        menu.add(buildSoundMenu());
 
         menu.addSeparator();
 
@@ -145,8 +141,75 @@ public final class TrayController {
         return m;
     }
 
+    private Menu buildSoundMenu() {
+        Menu m = new Menu("警告音");
+
+        MenuItem current = new MenuItem(soundLabel());
+        current.setEnabled(false);
+        m.add(current);
+
+        MenuItem choose = new MenuItem("音声ファイルを選択... (WAV/AIFF/AU)");
+        choose.addActionListener(e -> chooseSoundFile(current));
+        m.add(choose);
+
+        MenuItem reset = new MenuItem("組み込み音に戻す");
+        reset.addActionListener(e -> {
+            config.soundFile = "";
+            config.save();
+            current.setLabel(soundLabel());
+            notifier.test();
+        });
+        m.add(reset);
+
+        m.addSeparator();
+        m.add(buildVolumeMenu());
+
+        MenuItem test = new MenuItem("テスト再生");
+        test.addActionListener(e -> notifier.test());
+        m.add(test);
+
+        return m;
+    }
+
+    private String soundLabel() {
+        String f = config.soundFile;
+        if (f == null || f.isBlank()) {
+            return "現在: 組み込み音";
+        }
+        return "現在: " + new java.io.File(f).getName();
+    }
+
+    private void chooseSoundFile(MenuItem currentLabel) {
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+            fc.setDialogTitle("警告音に使う音声ファイルを選択");
+            fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                    "音声ファイル (*.wav, *.aif, *.aiff, *.au)", "wav", "aif", "aiff", "au"));
+            if (config.soundFile != null && !config.soundFile.isBlank()) {
+                java.io.File cur = new java.io.File(config.soundFile);
+                if (cur.getParentFile() != null) {
+                    fc.setCurrentDirectory(cur.getParentFile());
+                }
+            }
+            if (fc.showOpenDialog(null) != javax.swing.JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+            java.io.File picked = fc.getSelectedFile();
+            String err = NotificationService.validateSoundFile(picked);
+            if (err != null) {
+                javax.swing.JOptionPane.showMessageDialog(null, err, "使用できません",
+                        javax.swing.JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            config.soundFile = picked.getAbsolutePath();
+            config.save();
+            currentLabel.setLabel(soundLabel());
+            notifier.test();
+        });
+    }
+
     private Menu buildVolumeMenu() {
-        Menu m = new Menu("警告音の音量");
+        Menu m = new Menu("音量");
         int[] percents = {20, 40, 60, 80, 100};
         for (int p : percents) {
             float val = p / 100f;
