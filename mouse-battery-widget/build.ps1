@@ -85,12 +85,19 @@ if ($LASTEXITCODE -ne 0) { throw "jar creation failed" }
 Write-Host ("created: " + $jarPath)
 
 # --- VBS launcher (no console window) --------------------------------
+# Resolves paths at run time so the dist\ folder can be moved/copied freely.
 $javawGuess = Join-Path (Split-Path $java.Source) 'javaw.exe'
-$javaw = if (Test-Path $javawGuess) { $javawGuess } else { $java.Source }
+$javaw = if (Test-Path $javawGuess) { $javawGuess } else { 'javaw.exe' }
 $vbsLines = @(
     "' Launch MouseBatteryWidget without a console window"
-    'Set sh = CreateObject("WScript.Shell")'
-    ('sh.Run """' + $javaw + '"" -jar """' + $jarPath + '""", 0, False')
+    'Set fso = CreateObject("Scripting.FileSystemObject")'
+    'Set sh  = CreateObject("WScript.Shell")'
+    'q = Chr(34)'
+    'scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)'
+    'jarPath = fso.BuildPath(scriptDir, "MouseBatteryWidget.jar")'
+    'javaw = "' + ($javaw -replace '"', '""') + '"'
+    'If Not fso.FileExists(javaw) Then javaw = "javaw.exe"'
+    'sh.Run q & javaw & q & " -jar " & q & jarPath & q, 0, False'
 )
 $vbsPath = Join-Path $dist 'MouseBatteryWidget.vbs'
 Set-Content -Path $vbsPath -Value $vbsLines -Encoding ASCII
