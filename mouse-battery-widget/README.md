@@ -80,12 +80,18 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -InstallStartup
 
 これで次の処理を行います。
 
-1. `%LOCALAPPDATA%\MouseBatteryWidget\` に jar と vbs をコピー
+1. `%LOCALAPPDATA%\MouseBatteryWidget\` に jar をコピー
    （リポジトリが WSL 上にあるとログオン直後は共有が使えないことがあるため、
    Windows 側のローカルにコピーして起動を確実にする）
-2. スタートアップフォルダに `wscript.exe "<コピー先>\MouseBatteryWidget.vbs"` を実行する
-   ショートカットを作成
+2. レジストリ `HKCU\...\CurrentVersion\Run` に値 **`MouseBatteryWidget`** を追加
+   （`"javaw.exe" -jar "<コピー先>\MouseBatteryWidget.jar"`。`javaw` は窓なし）
 3. その場で 1 度起動
+
+**タスクマネージャー →「スタートアップ アプリ」に `MouseBatteryWidget` という名前で表示されます**
+（発行元は JDK ベンダー）。ここから一時的に無効化することもできます。
+
+> Startup フォルダのショートカットではなく Run キーを使うのは、ショートカット方式だと
+> タスクマネージャーに「Windows Script Host」等の名前で出て分かりにくいためです。
 
 **コードを変更したら `build.ps1 -InstallStartup` を再実行**してコピーを更新してください。
 
@@ -94,9 +100,6 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -InstallStartup
 ```powershell
 powershell -ExecutionPolicy Bypass -File build.ps1 -RemoveStartup
 ```
-
-手動でやる場合は `Win + R` → `shell:startup` を開き、
-`dist\MouseBatteryWidget.vbs`（または上記コピー先）のショートカットを置く / 消すだけです。
 
 ---
 

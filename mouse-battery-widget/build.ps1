@@ -30,25 +30,32 @@ $jarName = 'MouseBatteryWidget.jar'
 
 $appDir = Join-Path $env:LOCALAPPDATA 'MouseBatteryWidget'
 $startupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'MouseBatteryWidget.lnk'
-
-# --- -RemoveStartup (no build needed) --------------------------------
-if ($RemoveStartup) {
-    if (Test-Path $startupLnk) { Remove-Item $startupLnk -Force; Write-Host "removed: $startupLnk" }
-    else { Write-Host "no startup entry found." }
-    Get-CimInstance Win32_Process -Filter "Name='javaw.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like '*MouseBatteryWidget*' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host "stopped running instance (pid $($_.ProcessId))" }
-    return
-}
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$runName = 'MouseBatteryWidget'   # <- this is the name shown in Task Manager > Startup apps
 
 function Stop-RunningInstance {
     $procs = @(Get-CimInstance Win32_Process -Filter "Name='javaw.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*MouseBatteryWidget*' })
     foreach ($p in $procs) {
         Stop-Process -Id $p.ProcessId -Force
-        Write-Host "stopped running instance (pid $($p.ProcessId)) so the jar can be rebuilt"
+        Write-Host "stopped running instance (pid $($p.ProcessId))"
     }
     if ($procs.Count -gt 0) { Start-Sleep -Milliseconds 800 }
+}
+
+# --- -RemoveStartup (no build needed) --------------------------------
+if ($RemoveStartup) {
+    $removed = $false
+    if (Get-ItemProperty -Path $runKey -Name $runName -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -Path $runKey -Name $runName -Force
+        Write-Host "removed Run entry: $runKey\$runName"
+        $removed = $true
+    }
+    # also drop the old Startup-folder shortcut if a previous version created one
+    if (Test-Path $startupLnk) { Remove-Item $startupLnk -Force; Write-Host "removed: $startupLnk"; $removed = $true }
+    if (-not $removed) { Write-Host "no startup entry found." }
+    Stop-RunningInstance
+    return
 }
 
 # A running instance keeps dist\*.jar locked; stop it before rebuilding.
@@ -135,28 +142,37 @@ Write-Host ("created: " + $vbsPath + "  (double-click, or put in the Startup fol
 
 # --- -InstallStartup: copy to %LOCALAPPDATA% and register at logon ----
 # Copies out of the (possibly WSL-hosted) repo so it launches reliably at logon.
+# Uses an HKCU\...\Run value (not a Startup-folder shortcut) so Task Manager >
+# Startup apps lists it under the name "MouseBatteryWidget", not "Windows Script Host".
 if ($InstallStartup) {
-    Get-CimInstance Win32_Process -Filter "Name='javaw.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like '*MouseBatteryWidget*' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Stop-RunningInstance
 
     New-Item -ItemType Directory -Force -Path $appDir | Out-Null
     Copy-Item $jarPath (Join-Path $appDir $jarName) -Force
     Copy-Item $vbsPath (Join-Path $appDir 'MouseBatteryWidget.vbs') -Force
-    $installedVbs = Join-Path $appDir 'MouseBatteryWidget.vbs'
+    $installedJar = Join-Path $appDir $jarName
 
-    $ws = New-Object -ComObject WScript.Shell
-    $sc = $ws.CreateShortcut($startupLnk)
-    $sc.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
-    $sc.Arguments = '"' + $installedVbs + '"'
-    $sc.WorkingDirectory = $appDir
-    $sc.Description = 'Mouse Battery Widget'
-    $sc.Save()
+    $javawExe = if (Test-Path $javawGuess) { $javawGuess } else { 'javaw.exe' }
+    $runCmd = '"' + $javawExe + '" -jar "' + $installedJar + '"'
 
-    Write-Host ("installed to : " + $appDir)
-    Write-Host ("logon entry  : " + $startupLnk)
+    # javaw.exe is a GUI binary -> no console window, no wrapper needed
+    New-ItemProperty -Path $runKey -Name $runName -Value $runCmd -PropertyType String -Force | Out-Null
 
-    & (Join-Path $env:SystemRoot 'System32\wscript.exe') $installedVbs
+    # if a previous version left a Startup-folder shortcut, remove it to avoid double launch
+    if (Test-Path $startupLnk) { Remove-Item $startupLnk -Force }
+
+    # clear any "disabled by user" flag Task Manager may have set previously
+    $approved = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+    if (Test-Path $approved) {
+        Remove-ItemProperty -Path $approved -Name $runName -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ("installed to  : " + $appDir)
+    Write-Host ("logon entry   : " + $runKey + "\" + $runName)
+    Write-Host ("               = " + $runCmd)
+    Write-Host ("Task Manager  : Startup apps -> `"" + $runName + "`"")
+
+    Start-Process -FilePath $javawExe -ArgumentList @('-jar', $installedJar)
     Write-Host "`nstarted. it will now also launch at every logon."
     Write-Host "after changing the code, run 'build.ps1 -InstallStartup' again to refresh the copy."
     return
