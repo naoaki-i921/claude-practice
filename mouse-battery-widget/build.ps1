@@ -140,6 +140,27 @@ $vbsPath = Join-Path $dist 'MouseBatteryWidget.vbs'
 Set-Content -Path $vbsPath -Value $vbsLines -Encoding ASCII
 Write-Host ("created: " + $vbsPath + "  (double-click, or put in the Startup folder, for resident use)")
 
+# --- native launcher stub (so Task Manager shows "MouseBatteryWidget") ---
+# Windows 11 Task Manager > Startup apps shows the launching EXE's FileDescription.
+# This ~5KB C# stub carries that name and just starts javaw -jar <jar> next to it.
+$launcherExe = Join-Path $dist 'MouseBatteryWidget.exe'
+$csc = @(
+    "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+    "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+$launcherSrc = Join-Path $root 'src\launcher\Launcher.cs'
+if ($csc -and (Test-Path $launcherSrc)) {
+    if (Test-Path $launcherExe) { Remove-Item $launcherExe -Force }
+    & $csc /nologo /target:winexe /platform:anycpu "/out:$launcherExe" $launcherSrc
+    if (Test-Path $launcherExe) {
+        Write-Host ("created: " + $launcherExe)
+    } else {
+        Write-Host "warn: launcher stub build failed; will fall back to javaw at install time"
+    }
+} else {
+    Write-Host "note: csc.exe not found; -InstallStartup will register javaw directly (shows as 'javaw')"
+}
+
 # --- -InstallStartup: copy to %LOCALAPPDATA% and register at logon ----
 # Copies out of the (possibly WSL-hosted) repo so it launches reliably at logon.
 # Uses an HKCU\...\Run value (not a Startup-folder shortcut) so Task Manager >
@@ -153,9 +174,18 @@ if ($InstallStartup) {
     $installedJar = Join-Path $appDir $jarName
 
     $javawExe = if (Test-Path $javawGuess) { $javawGuess } else { 'javaw.exe' }
-    $runCmd = '"' + $javawExe + '" -jar "' + $installedJar + '"'
 
-    # javaw.exe is a GUI binary -> no console window, no wrapper needed
+    if (Test-Path $launcherExe) {
+        Copy-Item $launcherExe (Join-Path $appDir 'MouseBatteryWidget.exe') -Force
+        $installedLauncher = Join-Path $appDir 'MouseBatteryWidget.exe'
+        $runCmd = '"' + $installedLauncher + '"'
+        $startArgs = @{ FilePath = $installedLauncher }
+    } else {
+        # no stub -> register javaw directly (Task Manager will show "javaw")
+        $runCmd = '"' + $javawExe + '" -jar "' + $installedJar + '"'
+        $startArgs = @{ FilePath = $javawExe; ArgumentList = @('-jar', $installedJar) }
+    }
+
     New-ItemProperty -Path $runKey -Name $runName -Value $runCmd -PropertyType String -Force | Out-Null
 
     # if a previous version left a Startup-folder shortcut, remove it to avoid double launch
@@ -170,9 +200,9 @@ if ($InstallStartup) {
     Write-Host ("installed to  : " + $appDir)
     Write-Host ("logon entry   : " + $runKey + "\" + $runName)
     Write-Host ("               = " + $runCmd)
-    Write-Host ("Task Manager  : Startup apps -> `"" + $runName + "`"")
+    Write-Host ("Task Manager  : Startup apps -> `"MouseBatteryWidget`"")
 
-    Start-Process -FilePath $javawExe -ArgumentList @('-jar', $installedJar)
+    Start-Process @startArgs
     Write-Host "`nstarted. it will now also launch at every logon."
     Write-Host "after changing the code, run 'build.ps1 -InstallStartup' again to refresh the copy."
     return

@@ -80,18 +80,21 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -InstallStartup
 
 これで次の処理を行います。
 
-1. `%LOCALAPPDATA%\MouseBatteryWidget\` に jar をコピー
+1. `%LOCALAPPDATA%\MouseBatteryWidget\` に jar と小さなランチャ exe をコピー
    （リポジトリが WSL 上にあるとログオン直後は共有が使えないことがあるため、
    Windows 側のローカルにコピーして起動を確実にする）
 2. レジストリ `HKCU\...\CurrentVersion\Run` に値 **`MouseBatteryWidget`** を追加
-   （`"javaw.exe" -jar "<コピー先>\MouseBatteryWidget.jar"`。`javaw` は窓なし）
+   （中身は `"<コピー先>\MouseBatteryWidget.exe"`）
 3. その場で 1 度起動
 
-**タスクマネージャー →「スタートアップ アプリ」に `MouseBatteryWidget` という名前で表示されます**
-（発行元は JDK ベンダー）。ここから一時的に無効化することもできます。
+**タスクマネージャー →「スタートアップ アプリ」に `MouseBatteryWidget` という名前・
+発行元で表示されます。** ここから一時的に無効化することもできます。
 
-> Startup フォルダのショートカットではなく Run キーを使うのは、ショートカット方式だと
-> タスクマネージャーに「Windows Script Host」等の名前で出て分かりにくいためです。
+> Windows 11 のタスクマネージャーは登録名ではなく「起動する exe の説明」を表示するため、
+> `javaw.exe` を直接登録すると "javaw" と出てしまう。そこで `src/launcher/Launcher.cs`
+> をビルドした約 5KB のスタブ exe（説明 = MouseBatteryWidget）を噛ませている。
+> `csc.exe`（.NET Framework 同梱、通常どの Windows にもある）が無い場合は
+> 自動的に javaw 直接登録にフォールバックする。
 
 **コードを変更したら `build.ps1 -InstallStartup` を再実行**してコピーを更新してください。
 
