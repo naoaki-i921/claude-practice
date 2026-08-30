@@ -74,8 +74,29 @@ java -jar dist\MouseBatteryWidget.jar --debug
 
 ### スタートアップに登録（PC 起動時に自動実行）
 
-1. `Win + R` → `shell:startup` → Enter
-2. 開いたフォルダに `dist\MouseBatteryWidget.vbs` の**ショートカット**を置く
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1 -InstallStartup
+```
+
+これで次の処理を行います。
+
+1. `%LOCALAPPDATA%\MouseBatteryWidget\` に jar と vbs をコピー
+   （リポジトリが WSL 上にあるとログオン直後は共有が使えないことがあるため、
+   Windows 側のローカルにコピーして起動を確実にする）
+2. スタートアップフォルダに `wscript.exe "<コピー先>\MouseBatteryWidget.vbs"` を実行する
+   ショートカットを作成
+3. その場で 1 度起動
+
+**コードを変更したら `build.ps1 -InstallStartup` を再実行**してコピーを更新してください。
+
+解除:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1 -RemoveStartup
+```
+
+手動でやる場合は `Win + R` → `shell:startup` を開き、
+`dist\MouseBatteryWidget.vbs`（または上記コピー先）のショートカットを置く / 消すだけです。
 
 ---
 

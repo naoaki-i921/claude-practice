@@ -9,12 +9,16 @@
 
   Usage:
     powershell -ExecutionPolicy Bypass -File build.ps1
-    powershell -ExecutionPolicy Bypass -File build.ps1 -Run     # build then launch (resident)
-    powershell -ExecutionPolicy Bypass -File build.ps1 -Debug   # build then run diagnostics
+    powershell -ExecutionPolicy Bypass -File build.ps1 -Run              # build then launch (resident)
+    powershell -ExecutionPolicy Bypass -File build.ps1 -Debug            # build then run diagnostics
+    powershell -ExecutionPolicy Bypass -File build.ps1 -InstallStartup   # copy to %LOCALAPPDATA% and run at logon
+    powershell -ExecutionPolicy Bypass -File build.ps1 -RemoveStartup    # remove the logon entry
 #>
 param(
     [switch]$Run,
-    [switch]$Debug
+    [switch]$Debug,
+    [switch]$InstallStartup,
+    [switch]$RemoveStartup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +27,32 @@ $lib = Join-Path $root 'lib'
 $out = Join-Path $root 'build\classes'
 $dist = Join-Path $root 'dist'
 $jarName = 'MouseBatteryWidget.jar'
+
+$appDir = Join-Path $env:LOCALAPPDATA 'MouseBatteryWidget'
+$startupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'MouseBatteryWidget.lnk'
+
+# --- -RemoveStartup (no build needed) --------------------------------
+if ($RemoveStartup) {
+    if (Test-Path $startupLnk) { Remove-Item $startupLnk -Force; Write-Host "removed: $startupLnk" }
+    else { Write-Host "no startup entry found." }
+    Get-CimInstance Win32_Process -Filter "Name='javaw.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*MouseBatteryWidget*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host "stopped running instance (pid $($_.ProcessId))" }
+    return
+}
+
+function Stop-RunningInstance {
+    $procs = @(Get-CimInstance Win32_Process -Filter "Name='javaw.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*MouseBatteryWidget*' })
+    foreach ($p in $procs) {
+        Stop-Process -Id $p.ProcessId -Force
+        Write-Host "stopped running instance (pid $($p.ProcessId)) so the jar can be rebuilt"
+    }
+    if ($procs.Count -gt 0) { Start-Sleep -Milliseconds 800 }
+}
+
+# A running instance keeps dist\*.jar locked; stop it before rebuilding.
+Stop-RunningInstance
 
 # --- locate JDK -----------------------------------------------------------
 $javac = Get-Command javac -ErrorAction SilentlyContinue
@@ -103,6 +133,35 @@ $vbsPath = Join-Path $dist 'MouseBatteryWidget.vbs'
 Set-Content -Path $vbsPath -Value $vbsLines -Encoding ASCII
 Write-Host ("created: " + $vbsPath + "  (double-click, or put in the Startup folder, for resident use)")
 
+# --- -InstallStartup: copy to %LOCALAPPDATA% and register at logon ----
+# Copies out of the (possibly WSL-hosted) repo so it launches reliably at logon.
+if ($InstallStartup) {
+    Get-CimInstance Win32_Process -Filter "Name='javaw.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*MouseBatteryWidget*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
+    New-Item -ItemType Directory -Force -Path $appDir | Out-Null
+    Copy-Item $jarPath (Join-Path $appDir $jarName) -Force
+    Copy-Item $vbsPath (Join-Path $appDir 'MouseBatteryWidget.vbs') -Force
+    $installedVbs = Join-Path $appDir 'MouseBatteryWidget.vbs'
+
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut($startupLnk)
+    $sc.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    $sc.Arguments = '"' + $installedVbs + '"'
+    $sc.WorkingDirectory = $appDir
+    $sc.Description = 'Mouse Battery Widget'
+    $sc.Save()
+
+    Write-Host ("installed to : " + $appDir)
+    Write-Host ("logon entry  : " + $startupLnk)
+
+    & (Join-Path $env:SystemRoot 'System32\wscript.exe') $installedVbs
+    Write-Host "`nstarted. it will now also launch at every logon."
+    Write-Host "after changing the code, run 'build.ps1 -InstallStartup' again to refresh the copy."
+    return
+}
+
 # --- finish / run -----------------------------------------------------
 if ($Debug) {
     Write-Host "`n--- diagnostics ---`n"
@@ -114,6 +173,7 @@ elseif ($Run) {
 }
 else {
     Write-Host "`ndone."
-    Write-Host ("  diagnostics : java -jar `"" + $jarPath + "`" --debug")
-    Write-Host ("  resident    : wscript `"" + $vbsPath + "`"")
+    Write-Host ("  diagnostics    : java -jar `"" + $jarPath + "`" --debug")
+    Write-Host ("  resident       : wscript `"" + $vbsPath + "`"")
+    Write-Host ("  run at logon   : build.ps1 -InstallStartup")
 }
