@@ -195,54 +195,52 @@ public final class TrayController {
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
 
-        Color fg = colorFor(s);
+        // 塗りつぶした角丸の背景(状態色) + 白の太字。どのタスクバー色でも読める。
+        int arc = Math.round(size * 0.42f);
+        g.setColor(colorFor(s));
+        g.fillRoundRect(1, 1, size - 2, size - 2, arc, arc);
+        g.setStroke(new BasicStroke(1f));
+        g.setColor(new Color(0, 0, 0, 90));
+        g.drawRoundRect(1, 1, size - 3, size - 3, arc, arc);
 
+        String text;
         if (!s.present()) {
-            g.setColor(fg);
-            g.setStroke(new BasicStroke(Math.max(1f, size / 12f)));
-            int m = size / 5;
-            g.drawLine(m, m, size - m, size - m);
-            g.drawLine(size - m, m, m, size - m);
-            g.dispose();
-            return img;
+            text = "?";
+        } else if (s.percent() >= 100) {
+            text = "OK";
+        } else {
+            text = String.valueOf(s.percent());
         }
 
-        String text = s.percent() >= 100 ? "OK" : String.valueOf(s.percent());
-        float fontSize = text.length() <= 2 ? size * 0.80f : size * 0.58f;
+        float fontSize = size * (text.length() >= 2 ? 0.62f : 0.72f);
         g.setFont(new Font("SansSerif", Font.BOLD, Math.round(fontSize)));
         FontMetrics fm = g.getFontMetrics();
         int tw = fm.stringWidth(text);
         float x = (size - tw) / 2f;
-        float y = (size - fm.getHeight()) / 2f + fm.getAscent();
+        float y = (size - fm.getHeight()) / 2f + fm.getAscent() - size * 0.02f;
 
-        g.setColor(fg);
+        g.setColor(Color.WHITE);
         g.drawString(text, x, y);
-
-        if (s.charging()) {
-            g.setColor(new Color(90, 200, 255));
-            int r = Math.max(3, size / 5);
-            g.fillOval(size - r, 0, r, r);
-        }
 
         g.dispose();
         return img;
     }
 
-    /** 残量に応じた色。10%以下=赤、25%以下=橙、それ以上=緑、充電中=水色、未検出=灰。 */
+    /** 残量に応じた背景色。白文字が乗るので濃いめの色にする。 */
     static Color colorFor(MouseBattery b) {
         if (!b.present()) {
-            return new Color(150, 150, 150);
+            return new Color(120, 120, 120);   // gray
         }
         if (b.charging()) {
-            return new Color(90, 200, 255);
+            return new Color(30, 136, 229);     // blue
         }
         int p = b.percent();
         if (p <= 10) {
-            return new Color(255, 80, 80);
+            return new Color(211, 47, 47);      // red
         }
         if (p <= 25) {
-            return new Color(255, 190, 60);
+            return new Color(230, 145, 0);      // amber
         }
-        return new Color(120, 220, 130);
+        return new Color(46, 150, 62);          // green
     }
 }
